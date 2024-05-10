@@ -9,7 +9,7 @@ scrw = 1280  # screen width
 scrh = 720  # screen height
 bw = int(1e+2)  # board dims
 cellsize = 50  # default cell size in pixels
-cps = 5  # mvmt speed in cells per second
+cps = 9  # mvmt speed in cells per second
 cellclr = {0: "Black",
            1: "Blue",
            2: "Green",
@@ -60,11 +60,11 @@ for i in range(bw):
         board[i][j] = 1
 
 for i in range(bw):
-    board[i][0] = 4
-    board[i][bh - 1] = 4
+    board[i][0] = 3
+    board[i][bh - 1] = 3
 for i in range(bh):
-    board[0][i] = 4
-    board[bw - 1][i] = 4
+    board[0][i] = 3
+    board[bw - 1][i] = 3
 board[50][50] = 2
 
 # Main game loop:
@@ -87,9 +87,11 @@ while running:
 
     for wc in range(cell_left, cell_right, 1):
         for hc in range(cell_top, cell_bottom, 1):
-            if board[wc][hc] != 0:
+            bx = min(max(wc, 0), bw - 1)
+            by = min(max(hc, 0), bh - 1)
+            if board[bx][by] != 0:
                 pygame.draw.rect(screen,
-                                 cellclr[int(board[wc][hc])],
+                                 cellclr[int(board[bx][by])],
                                  pygame.Rect(int((wc * cellsize) - scrtl[0]),
                                              int((hc * cellsize) - scrtl[1]),
                                              int(cellsize),

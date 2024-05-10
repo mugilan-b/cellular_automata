@@ -1,0 +1,1 @@
+Python project to simulate Cellular automation. WIP, will update details later. Uses pygame-ce.
