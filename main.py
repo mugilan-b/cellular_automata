@@ -3,13 +3,14 @@ import numpy as np
 import time
 import math
 import pygame
+import sys
 
 # Sim settings
 scrw = 1280  # screen width
 scrh = 720  # screen height
 bw = int(1e+2)  # board dims
 cellsize = 50  # default cell size in pixels
-cps = 9  # mvmt speed in cells per second
+cps = 9  # base mvmt speed in cells per second
 cellclr = {0: "Black",
            1: "Blue",
            2: "Green",
@@ -67,13 +68,16 @@ for i in range(bh):
     board[bw - 1][i] = 3
 board[50][50] = 2
 
+i = 0
+
 # Main game loop:
 while running:
     i += 1
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
-            break
+            print("User quit")
+            sys.exit()
 
     screen.fill("gray25")
 
@@ -142,9 +146,11 @@ while running:
     if keys[pygame.K_k]:
         if cellsize > 20:
             cellsize /= zoomsens
+            cps *= zoomsens
     if keys[pygame.K_j]:
         if cellsize < 200:
             cellsize *= zoomsens
+            cps /= zoomsens
 
     scrtl = [int(btl[0] * cellsize), int(btl[1] * cellsize)]
     cells_h = (scrh / cellsize) + margin
