@@ -4,6 +4,9 @@ import time
 import math
 import pygame
 import sys
+import cython
+
+from cython.parallel import prange
 
 # Sim settings
 scrw = 1280  # screen width
@@ -20,6 +23,8 @@ scrsplit = 0.7  # screen split - board | stats, eff 896px
 maxfps = int(60)  # max FPS limit
 margin = 2  # extra cells to render
 zoomsens = 1.008  # zoom sensitivity, multiplicative
+textcolor = "White"
+textbg = "Black"
 
 # Initialize pygame & game setup:
 pygame.init()
@@ -30,8 +35,8 @@ clock = pygame.time.Clock()
 
 currfps = font.render('Current FPS: ',
                       True,
-                      "White",
-                      "Black"
+                      textcolor,
+                      textbg
                       )
 currfpsRect = currfps.get_rect()
 currfpsRect.left = (scrw * scrsplit * 1.03)
@@ -39,22 +44,22 @@ currfpsRect.top = (scrh * 0.05)
 fps = 0
 fpstext = font.render(str(fps),
                       True,
-                      "White",
-                      "Black")
+                      textcolor,
+                      textbg)
 fpsRect = fpstext.get_rect()
 fpsRect.left = currfpsRect.right * 1.01
 fpsRect.top = currfpsRect.top
 cst = font.render('Scale: ',
                   True,
-                  "White",
-                  "Black")
+                  textcolor,
+                  textbg)
 cstRect = cst.get_rect()
 cstRect.left = (scrw * scrsplit * 1.03)
 cstRect.top = currfpsRect.bottom * 1.1
 csnt = font.render(str(cellsize),
                    True,
-                   "White",
-                   "Black")
+                   textcolor,
+                   textbg)
 csntRect = csnt.get_rect()
 csntRect.left = cstRect.right * 1.01
 csntRect.top = cstRect.top
@@ -83,6 +88,36 @@ for i in range(bh):
 board[50][50] = 2
 i = 0
 
+
+@cython.cfunc
+@cython.boundscheck(False)
+def renderboard(cl: cython.int, cr: cython.int, ct: cython.int, cb: cython.int):
+    global cam_pos, cellsize, screen, cellclr, board
+    cp: cython.double[:, :] = cam_pos.copy()
+    cs: cython.double = cellsize
+    w_c: cython.Py_ssize_t
+    h_c: cython.Py_ssize_t
+    for w_c in prange(cr - cl, nogil=True):
+        for h_c in range(cb - ct):
+            pygame.draw.rect(screen,
+                             cellclr[int(board[w_c + cl][h_c + ct])],
+                             pygame.Rect(int((w_c + cl - cp[0]) * cs),
+                                         int((h_c + ct - cp[1]) * cs),
+                                         int(cs),
+                                         int(cs)
+                                         )
+                             )
+            pygame.draw.rect(screen,
+                             "Black",
+                             pygame.Rect(int((w_c + cl - cp[0]) * cs),
+                                         int((h_c + ct - cp[1]) * cs),
+                                         int(cs),
+                                         int(cs)
+                                         ),
+                             1 + int(cs / 40)
+                             )
+
+
 # Main game loop:
 while running:
     i += 1
@@ -100,38 +135,19 @@ while running:
     cell_bottom = cell_top + int(cells_h)
 
     fps = clock.get_fps()
-    fpstext = font.render(str(f'{fps:.2f}'), True, "White", "Black")
-    csnt = font.render(str(f'{cellsize:.2f}'), True, "White", "Black")
+    fpstext = font.render(str(f'{fps:.2f}'), True, textcolor, textbg)
+    csnt = font.render(str(f'{cellsize:.2f}'), True, textcolor, textbg)
 
-    for wc in range(cell_left, min(cell_right, bw), 1):
-        for hc in range(cell_top, min(cell_bottom, bh), 1):
-            if board[wc][hc] != 0:
-                pygame.draw.rect(screen,
-                                 cellclr[int(board[wc][hc])],
-                                 pygame.Rect(int((wc - cam_pos[0]) * cellsize),
-                                             int((hc - cam_pos[1]) * cellsize),
-                                             int(cellsize),
-                                             int(cellsize)
-                                             )
-                                 )
-                pygame.draw.rect(screen,
-                                 "Black",
-                                 pygame.Rect(int((wc - cam_pos[0]) * cellsize),
-                                             int((hc - cam_pos[1]) * cellsize),
-                                             int(cellsize),
-                                             int(cellsize)
-                                             ),
-                                 math.ceil(cellsize / 40)
-                                 )
+    renderboard(cell_left, min(cell_right, bw), cell_top, min(cell_bottom, bh))
 
     pygame.draw.line(screen,
-                     "White",
+                     textcolor,
                      (int(scrw * scrsplit), 0),
                      (int(scrw * scrsplit), scrh),
                      3
                      )
     pygame.draw.rect(screen,
-                     "Black",
+                     textbg,
                      pygame.Rect(scrw * scrsplit,
                                  0,
                                  scrw * (1 - scrsplit),
