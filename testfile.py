@@ -1,36 +1,33 @@
-import pygame
+import numpy as np
+import cupy as cp
 
-# pygame setup
-# pygame.init()
-# screen = pygame.display.set_mode((1280, 720))
-# clock = pygame.time.Clock()
-# running = True
-# i = 0
-#
-# while running:
-#     print(i)
-#     i = i + 1
-#     for event in pygame.event.get():
-#         if event.type == pygame.QUIT:
-#             running = False
-#
-#     pygame.draw.rect(screen,
-#                      "Red",
-#                      pygame.Rect(300, 300, 200, 200)
-#                      )
-#
-#     pygame.draw.circle(screen,
-#                        "Green",
-#                        [400, 400],
-#                        5
-#                        )
-#
-#     pygame.display.flip()
-#
-#     clock.tick(60)
-#
-# pygame.quit()
-abb = [100, 40]
-ac = abb * 40
-abb = abb * 2
-print(ac)
+from cupyx.profiler import benchmark
+
+# print(benchmark(squared_diff, (x, y), n_repeat=1000))
+
+loaded_from_source = r'''
+extern "C"
+{
+__global__ void test_sum(const float* x1, int* y, const unsigned int N, const int c)
+   {
+   unsigned int tid = (blockDim.x * blockIdx.x) + threadIdx.x;
+      if (tid < N * N)
+      {
+         if(x1[tid] == 0)
+         {
+            y[tid] = x1[tid] + c;
+         }
+      }
+   }
+}
+'''
+
+module = cp.RawModule(code=loaded_from_source)
+ker_sum = module.get_function('test_sum')
+N = 10
+x1 = cp.zeros(N**2, dtype=cp.float32).reshape(N, N)
+# x2 = cp.ones((N, N), dtype=cp.float32)
+y = cp.zeros((N, N), dtype=cp.uint32)
+ker_sum((N,), (N,), (x1, y, N, 5))
+print(x1)
+print(y)
