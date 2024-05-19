@@ -1,20 +1,22 @@
 import numpy as np
-# import matplotlib.pyplot as plt
+import cupy as cp
 import time
 import math
 import pygame
 import sys
+import cv2
+
 
 # Sim settings
 scrw = 1280  # screen width
 scrh = 720  # screen height
 bw = int(1e+2)  # board dims
-cellsize = 50  # default cell size in pixels
-cps = 9  # base mvmt speed in cells per second
-cellclr = {0: "Black",
-           1: "Blue",
-           2: "Green",
-           3: "White"
+cellsize = 40  # default cell size in pixels
+base_cps = 100  # base mvmt speed
+cellclr = {0: (0, 0, 0),
+           1: (0, 0, 255),
+           2: (0, 255, 0),
+           3: (255, 255, 255)
            }  # cell colors
 scrsplit = 0.7  # screen split - board | stats, eff 896px
 maxfps = int(60)  # max FPS limit
@@ -64,12 +66,9 @@ csntRect.top = cstRect.top
 running = True
 dt = 0  # time elapsed (in ms)
 bh = int(bw)
-board = np.zeros((bw, bh), dtype=np.int8)
-cells_h = (scrh / cellsize) + margin  # number of cells to render, w and h dims. float
-cells_w = ((scrw * scrsplit) / cellsize) + margin
-cam_pos = [(bw / 2) - ((cells_w - margin) / 2) + 0.5,
-           (bh / 2) - ((cells_h - margin) / 2) + 0.5
-           ]  # cam position, denotes top left in board coordinates
+board = np.zeros((bw, bh), dtype=np.uint8)
+cam_pos = [bw / 2, bh / 2]
+cps = base_cps * math.pow(cellsize, -0.6)
 
 # Initial state
 for i in range(bw):
@@ -85,6 +84,91 @@ for i in range(bh):
 board[50][50] = 2
 i = 0
 
+cppsource = r'''
+extern "C"
+{
+__global__ void render(const float* inps, const unsigned int* board, int* scrn)
+    {
+        unsigned int indx = blockDim.x * blockIdx.x + threadIdx.x;
+        if (indx < int(*(inps + 6)))
+        {
+            float bx = 0;
+            float by = 0;
+            int px = 0;
+            int py = 0;
+            //int escrw = 0;
+            float cs = 1;
+            float cpx = 0;
+            float cpy = 0;
+            int bw = 100;
+            int bh = 100;
+            
+            //escrw = *(inps + 0);
+            cpx = *(inps + 1);
+            cpy = *(inps + 2);
+            cs = *(inps + 3);
+            bw = *(inps + 4);
+            bh = *(inps + 5);
+            
+            px = indx / blockDim.x;
+            py = indx % blockDim.x;
+            //bx = cpx + (px / cs);
+            //by = cpy + (py / cs);
+            bx = (px / cs) + cpx;
+            by = (py / cs) + cpy;
+            //printf("%lf\n", bx);
+            if(bx >= 0 && by >= 0 && int(bx) <= bw && int(by) <= bh)
+            {
+                if(*(board + int(bx) + (bw * int(by))) == 1)
+                {
+                    *(scrn + (3 * indx)) = 30;
+                    *(scrn + (3 * indx) + 1) = 30;
+                    *(scrn + (3 * indx) + 2) = 30;
+                } else if (*(board + int(bx) + (bw * int(by))) == 2)
+                {
+                    *(scrn + (3 * indx)) = 255;
+                    *(scrn + (3 * indx) + 1) = 255;
+                    *(scrn + (3 * indx) + 2) = 255;  
+                } else
+                {
+                    *(scrn + (3 * indx)) = 0;
+                    *(scrn + (3 * indx) + 1) = 0;
+                    *(scrn + (3 * indx) + 2) = 0;
+                }
+            }
+            else
+            {
+                *(scrn + (3 * indx)) = 0;
+                *(scrn + (3 * indx) + 1) = 0;
+                *(scrn + (3 * indx) + 2) = 0;
+            }
+        }
+    }
+}
+'''
+gpgpumodule = cp.RawModule(code=cppsource)
+rendergpu = gpgpumodule.get_function('render')
+
+
+def renderer():
+    bd = cp.asarray(board, dtype=cp.uint32)
+    screenarr = cp.zeros((int(scrw * scrsplit), scrh, 3), dtype=cp.uint32)
+
+    args = cp.array([scrw * scrsplit,
+                     cam_pos[0],
+                     cam_pos[1],
+                     cellsize,
+                     bw,
+                     bh,
+                     scrw * scrsplit * scrh,
+                     ], dtype=cp.float32)
+    rendergpu((int(scrw * scrsplit),), (scrh,),
+              (args,
+               bd,
+               screenarr))
+    return screenarr.get()
+
+
 # Main game loop:
 while running:
     i += 1
@@ -94,37 +178,14 @@ while running:
             print("User quit")
             sys.exit()
 
-    screen.fill("gray25")
-
-    cell_left = max(math.floor(cam_pos[0]), 0)
-    cell_right = cell_left + int(cells_w)
-    cell_top = max(math.floor(cam_pos[1]), 0)
-    cell_bottom = cell_top + int(cells_h)
-
+    scrn = np.zeros((scrw, scrh, 3), dtype=np.uint8)
     fps = clock.get_fps()
     fpstext = font.render(str(f'{fps:.2f}'), True, textcolor, textbg)
     csnt = font.render(str(f'{cellsize:.2f}'), True, textcolor, textbg)
 
-    for wc in range(cell_left, min(cell_right, bw), 1):
-        for hc in range(cell_top, min(cell_bottom, bh), 1):
-            pygame.draw.rect(screen,
-                             cellclr[int(board[wc][hc])],
-                             pygame.Rect(int((wc - cam_pos[0]) * cellsize),
-                                         int((hc - cam_pos[1]) * cellsize),
-                                         int(cellsize),
-                                         int(cellsize)
-                                         )
-                             )
-            pygame.draw.rect(screen,
-                             "Black",
-                             pygame.Rect(int((wc - cam_pos[0]) * cellsize),
-                                         int((hc - cam_pos[1]) * cellsize),
-                                         int(cellsize),
-                                         int(cellsize)
-                                         ),
-                             math.ceil(cellsize / 40)
-                             )
+    scrn[0:int(scrw * scrsplit)][:] = renderer()
 
+    pygame.surfarray.blit_array(screen, scrn)
     pygame.draw.line(screen,
                      textcolor,
                      (int(scrw * scrsplit), 0),
@@ -157,14 +218,10 @@ while running:
     if keys[pygame.K_k]:
         if cellsize > 1:
             cellsize /= zoomsens
-            cps *= zoomsens
     if keys[pygame.K_j]:
         cellsize *= zoomsens
-        cps /= zoomsens
 
-    cells_h = (scrh / cellsize) + margin
-    cells_w = ((scrw * scrsplit) / cellsize) + margin
-
+    cps = base_cps * math.pow(cellsize, -0.6)
     # Render
     pygame.display.flip()
     dt = clock.tick(maxfps)
