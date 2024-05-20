@@ -13,14 +13,8 @@ scrh = 720  # screen height
 bw = int(1e+2)  # board dims
 cellsize = 40  # default cell size in pixels
 base_cps = 100  # base mvmt speed
-cellclr = {0: (0, 0, 0),
-           1: (0, 0, 255),
-           2: (0, 255, 0),
-           3: (255, 255, 255)
-           }  # cell colors
 scrsplit = 0.7  # screen split - board | stats, eff 896px
 maxfps = int(60)  # max FPS limit
-margin = 2  # extra cells to render
 zoomsens = 1.008  # zoom sensitivity, multiplicative
 textcolor = "White"
 textbg = "Black"
@@ -102,6 +96,8 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
             float cpy = 0;
             int bw = 100;
             int bh = 100;
+            float fracx = 0;
+            float fracy = 0;
             
             //escrw = *(inps + 0);
             cpx = *(inps + 1);
@@ -112,12 +108,11 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
             
             px = indx / blockDim.x;
             py = indx % blockDim.x;
-            //bx = cpx + (px / cs);
-            //by = cpy + (py / cs);
             bx = (px / cs) + cpx;
             by = (py / cs) + cpy;
-            //printf("%lf\n", bx);
-            if(bx >= 0 && by >= 0 && int(bx) <= bw && int(by) <= bh)
+            fracx = bx - int(bx);
+            fracy = by - int(by);
+            if(bx >= 0 && by >= 0 && int(bx) <= bw && int(by) <= bh && fracx >= 0.1 && fracy >= 0.1)
             {
                 if(*(board + int(bx) + (bw * int(by))) == 1)
                 {
@@ -144,10 +139,82 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
             }
         }
     }
+    
+__global__ void update(const unsigned int* inps, const unsigned int* board)
+    {
+        unsigned int ix = blockDim.x * blockIdx.x + threadIdx.x;
+        if(ix < b_w * b_h)
+        {
+            unsigned int b_x = 0;
+            unsigned int b_y = 0;
+            unsigned int b_w = 0;
+            unsigned int b_h = 0;
+            unsigned int leftind = 0;
+            unsigned int rightind = 0;
+            unsigned int topind = 0;
+            unsigned int bottomind = 0;
+            int cnt = 0;
+            
+            b_w = *(inps + 0);
+            b_h = *(inps + 1);
+            b_x = ix / blockDim.x;
+            b_y = ix % blockDim.x;
+            leftind = (b_x - 1) % b_w;
+            rightind = (b_x + 1) % b_w;
+            topind = (b_y - 1) % b_h;
+            bottomind = (b_y + 1) % b_h;
+            
+            if(*(board + b_x + (b_w * topind)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + rightind + (b_w * topind)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + rightind + (b_w * b_y)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + rightind + (b_w * bottomind)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + b_x + (b_w * bottomind)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + leftind + (b_w * bottomind)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + leftind + (b_w * b_y)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + leftind + (b_w * topind)) == 1)
+            {
+                cnt++;
+            }
+            if(cnt < 2)
+            {
+                *(board + b_x + (b_w * b_y)) = 0;
+            }
+            if(cnt > 1 && cnt < 4)
+            {
+                *(board + b_x + (b_w * b_y)) = 1;
+            }
+            if(cnt > 3)
+            {
+                *(board + b_x + (b_w * b_y)) = 0;
+            }
+        }
+    }
 }
 '''
 gpgpumodule = cp.RawModule(code=cppsource)
 rendergpu = gpgpumodule.get_function('render')
+updateboard = gpgpumodule.get_function('update')
 
 
 def renderer():
@@ -167,6 +234,12 @@ def renderer():
                bd,
                screenarr))
     return screenarr.get()
+
+
+def board_update():
+    bd = cp.asarray(board, dtype=cp.uint32)
+    args = cp.array([], dtype=cp.uint32)
+    updateboard((bw, ), (bh, ), (args, bd))
 
 
 # Main game loop:
