@@ -10,7 +10,7 @@ import cv2
 # Sim settings
 scrw = 1280                 # screen width
 scrh = 720                  # screen height
-bw = 2400                   # board dims
+bw = 480                   # board dims
 bh = bw
 cellsize = 40               # default cell size in pixels
 base_cps = 100              # base mvmt speed
@@ -65,13 +65,11 @@ csntRect = csnt.get_rect()
 csntRect.left = cstRect.right * 1.01
 csntRect.top = cstRect.top
 
-running = True
 dt = 0  # time elapsed (in ms)
 bh = int(bh)
 bw = int(bw)
 ube_f = maxfps * update_board_every_s
 board = np.zeros((bw, bh), dtype=np.uint8)
-board_gpu = cp.zeros((bw, bh), dtype=cp.uint32)
 cam_pos = [bw / 2, bh / 2]
 cps = base_cps * math.pow(cellsize, -0.6)
 
@@ -86,10 +84,12 @@ cps = base_cps * math.pow(cellsize, -0.6)
 #     board[0][i] = 3
 #     board[bw - 1][i] = 3
 # board[50][50] = 2
+for i in range(bw):
+    board[i][200] = 2
+    board[i][201] = 2
+    board[i][202] = 2
+    board[i][203] = 2
 middle = int(bw / 2)
-board[middle, middle] = 1
-board[middle - 1, middle] = 1
-board[middle + 1, middle] = 1
 
 i = 0
 board_gpu = cp.asarray(board, dtype=cp.uint32)
@@ -142,7 +142,7 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
                 } else
                 {
                     *(scrn + (3 * indx)) = 0;
-                    *(scrn + (3 * indx) + 1) = 0;
+                    *(scrn + (3 * indx) + 1) = 60;
                     *(scrn + (3 * indx) + 2) = 0;
                 }
             }
@@ -256,7 +256,7 @@ def board_update():
 
 
 # Main game loop:
-while running:
+while True:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
@@ -314,5 +314,3 @@ while running:
     pygame.display.flip()
     dt = clock.tick(maxfps)
     i += 1
-
-print("Process finished")
