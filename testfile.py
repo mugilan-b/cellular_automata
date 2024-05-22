@@ -7,18 +7,23 @@ import sys
 # print(benchmark(squared_diff, (x, y), n_repeat=1000))
 
 pygame.init()
-screen = pygame.display.set_mode((1280, 720))
+screen = pygame.display.set_mode((1120, 800))
 loaded_from_source = r'''
 extern "C"
 {
-__global__ void test_sum(int* y)
+__global__ void test_sum(int* y, const unsigned int arrxsize)
     {
-    unsigned int tid = (blockDim.x * blockIdx.x) + threadIdx.x;
-    unsigned int py = tid % blockDim.x;
-    unsigned int px = tid / blockDim.x;
-        if (tid < 1280 * 720)
+    //unsigned int tid = (blockDim.x * (blockIdx.x + (blockDim.x * blockIdx.y))) + (threadIdx.x + (threadDim.x * threadIdx.y);
+    //unsigned int tn = threadIdx.x + (threadDim.x * threadIdx.y);
+    //unsigned int bn = blockIdx.x + (blockDim.x * blockIdx.y);
+    unsigned int i = (blockIdx.x * blockDim.x) + threadIdx.x;
+    unsigned int j = (blockIdx.y * blockDim.y) + threadIdx.y;
+    unsigned int tid = j + (i * arrxsize);
+    unsigned int py = j;
+    unsigned int px = i;
+        if (tid < 1120 * 800)
         {
-            if(px < 240)
+            if(px > 300)
             {
                 *(y + (tid * 3)) = 0;
                 *(y + (tid * 3) + 1) = 255;
@@ -36,8 +41,8 @@ __global__ void test_sum(int* y)
 '''
 module = cp.RawModule(code=loaded_from_source)
 disp = module.get_function('test_sum')
-scrn = cp.zeros((1280, 720, 3), dtype=cp.uint32)
-disp((1280,), (720,), scrn)
+scrn = cp.zeros((1120, 800, 3), dtype=cp.uint32)
+disp((70, 50), (16, 16), scrn)
 while True:
     screen.fill("Black")
     for event in pygame.event.get():

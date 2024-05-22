@@ -8,22 +8,24 @@ import cv2
 
 
 # Sim settings
-scrw = 1280  # screen width
-scrh = 720  # screen height
-bw = int(1e+2)  # board dims
-cellsize = 40  # default cell size in pixels
-base_cps = 100  # base mvmt speed
-cellclr = {0: (0, 0, 0),
-           1: (0, 0, 255),
-           2: (0, 255, 0),
-           3: (255, 255, 255)
-           }  # cell colors
-scrsplit = 0.7  # screen split - board | stats, eff 896px
-maxfps = int(60)  # max FPS limit
-margin = 2  # extra cells to render
-zoomsens = 1.008  # zoom sensitivity, multiplicative
+scrw = 1280                 # screen width
+scrh = 720                  # screen height
+bw = 480                   # board dims
+bh = bw
+cellsize = 40               # default cell size in pixels
+base_cps = 100              # base mvmt speed
+scrsplit = 0.7              # screen split - board | stats, eff 896px
+maxfps = int(60)            # max FPS limit
+zoomsens = 1.008            # zoom sensitivity, multiplicative
+update_board_every_s = 2    # Update board every n seconds
 textcolor = "White"
 textbg = "Black"
+
+# TO DO:
+# * CHECK AND FIX COORDINATES, X AND Y SEEM FLIPPED?????
+# AS A RESULT, BOARD UPDATE DOESN'T WORK AS INTENDED!!!!
+# * Add update counter text: to count number of board updates so far.
+# * Add mouse interactivity.
 
 # Initialize pygame & game setup:
 pygame.init()
@@ -63,47 +65,56 @@ csntRect = csnt.get_rect()
 csntRect.left = cstRect.right * 1.01
 csntRect.top = cstRect.top
 
-running = True
 dt = 0  # time elapsed (in ms)
-bh = int(bw)
+bh = int(bh)
+bw = int(bw)
+ube_f = maxfps * update_board_every_s
 board = np.zeros((bw, bh), dtype=np.uint8)
 cam_pos = [bw / 2, bh / 2]
 cps = base_cps * math.pow(cellsize, -0.6)
 
 # Initial state
+# for i in range(bw):
+#     for j in range(bh):
+#         board[i][j] = 1
+# for i in range(bw):
+#     board[i][0] = 3
+#     board[i][bh - 1] = 3
+# for i in range(bh):
+#     board[0][i] = 3
+#     board[bw - 1][i] = 3
+# board[50][50] = 2
 for i in range(bw):
-    for j in range(bh):
-        board[i][j] = 1
+    board[i][200] = 2
+    board[i][201] = 2
+    board[i][202] = 2
+    board[i][203] = 2
+middle = int(bw / 2)
 
-for i in range(bw):
-    board[i][0] = 3
-    board[i][bh - 1] = 3
-for i in range(bh):
-    board[0][i] = 3
-    board[bw - 1][i] = 3
-board[50][50] = 2
 i = 0
+board_gpu = cp.asarray(board, dtype=cp.uint32)
 
 cppsource = r'''
 extern "C"
 {
 __global__ void render(const float* inps, const unsigned int* board, int* scrn)
     {
-        unsigned int indx = blockDim.x * blockIdx.x + threadIdx.x;
-        if (indx < int(*(inps + 6)))
+        unsigned int indx = (blockDim.x * blockIdx.x) + threadIdx.x;
+        // unsigned int lim = ;
+        if (indx < *(inps + 6))
         {
             float bx = 0;
             float by = 0;
             int px = 0;
             int py = 0;
-            //int escrw = 0;
             float cs = 1;
             float cpx = 0;
             float cpy = 0;
             int bw = 100;
             int bh = 100;
+            float fracx = 0;
+            float fracy = 0;
             
-            //escrw = *(inps + 0);
             cpx = *(inps + 1);
             cpy = *(inps + 2);
             cs = *(inps + 3);
@@ -112,19 +123,18 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
             
             px = indx / blockDim.x;
             py = indx % blockDim.x;
-            //bx = cpx + (px / cs);
-            //by = cpy + (py / cs);
             bx = (px / cs) + cpx;
             by = (py / cs) + cpy;
-            //printf("%lf\n", bx);
-            if(bx >= 0 && by >= 0 && int(bx) <= bw && int(by) <= bh)
+            fracx = bx - int(bx);
+            fracy = by - int(by);
+            if(bx >= 0 && by >= 0 && int(bx) <= bw && int(by) <= bh && fracx >= 0.1 && fracy >= 0.1)
             {
-                if(*(board + int(bx) + (bw * int(by))) == 1)
+                if(*(board + int(bx) + (bw * int(by))) == 0)
                 {
                     *(scrn + (3 * indx)) = 30;
                     *(scrn + (3 * indx) + 1) = 30;
                     *(scrn + (3 * indx) + 2) = 30;
-                } else if (*(board + int(bx) + (bw * int(by))) == 2)
+                } else if (*(board + int(bx) + (bw * int(by))) == 1)
                 {
                     *(scrn + (3 * indx)) = 255;
                     *(scrn + (3 * indx) + 1) = 255;
@@ -132,7 +142,7 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
                 } else
                 {
                     *(scrn + (3 * indx)) = 0;
-                    *(scrn + (3 * indx) + 1) = 0;
+                    *(scrn + (3 * indx) + 1) = 60;
                     *(scrn + (3 * indx) + 2) = 0;
                 }
             }
@@ -144,14 +154,83 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
             }
         }
     }
+
+__global__ void update(const unsigned int* inps, unsigned int* board)
+    {
+        unsigned int i = (blockIdx.x * blockDim.x) + threadIdx.x;
+        unsigned int j = (blockIdx.y * blockDim.y) + threadIdx.y;
+        unsigned int b_w = *(inps + 0);
+        unsigned int b_h = *(inps + 1);
+        unsigned int tid = j + (i * b_w);
+        unsigned int px = i;        
+        unsigned int py = j;
+        if(tid < b_w * b_h)
+        {
+            unsigned int leftind = 0;
+            unsigned int rightind = 0;
+            unsigned int topind = 0;
+            unsigned int bottomind = 0;
+            int cnt = 0;
+            
+            leftind = (i - 1) % b_w;
+            rightind = (i + 1) % b_w;
+            topind = (j - 1) % b_h;
+            bottomind = (j + 1) % b_h;
+            
+            if(*(board + i + (b_w * topind)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + rightind + (b_w * topind)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + rightind + (b_w * j)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + rightind + (b_w * bottomind)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + i + (b_w * bottomind)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + leftind + (b_w * bottomind)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + leftind + (b_w * j)) == 1)
+            {
+                cnt++;
+            }
+            if(*(board + leftind + (b_w * topind)) == 1)
+            {
+                cnt++;
+            }
+            if(cnt < 2)
+            {
+                *(board + i + (b_w * j)) = 0;
+            }
+            if(cnt > 1 && cnt < 4)
+            {
+                *(board + i + (b_w * j)) = 1;
+            }
+            if(cnt > 3)
+            {
+                *(board + i + (b_w * j)) = 0;
+            }
+        }
+    }
 }
 '''
 gpgpumodule = cp.RawModule(code=cppsource)
 rendergpu = gpgpumodule.get_function('render')
+updateboard = gpgpumodule.get_function('update')
 
 
 def renderer():
-    bd = cp.asarray(board, dtype=cp.uint32)
     screenarr = cp.zeros((int(scrw * scrsplit), scrh, 3), dtype=cp.uint32)
 
     args = cp.array([scrw * scrsplit,
@@ -160,23 +239,32 @@ def renderer():
                      cellsize,
                      bw,
                      bh,
-                     scrw * scrsplit * scrh,
+                     int(scrw * scrsplit * scrh),
                      ], dtype=cp.float32)
     rendergpu((int(scrw * scrsplit),), (scrh,),
               (args,
-               bd,
+               board_gpu,
                screenarr))
     return screenarr.get()
 
 
+def board_update():
+    global board
+    args = cp.array([bw, bh], dtype=cp.uint32)
+    updateboard((int(bw / 24), int(bh / 24)), (24, 24), (args, board_gpu))
+    board = board_gpu.get()
+
+
 # Main game loop:
-while running:
-    i += 1
+while True:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
             print("User quit")
             sys.exit()
+
+    if (i % ube_f) == int(ube_f / 2):
+        board_update()
 
     scrn = np.zeros((scrw, scrh, 3), dtype=np.uint8)
     fps = clock.get_fps()
@@ -225,5 +313,4 @@ while running:
     # Render
     pygame.display.flip()
     dt = clock.tick(maxfps)
-
-print("Process finished")
+    i += 1
