@@ -99,9 +99,12 @@ extern "C"
 {
 __global__ void render(const float* inps, const unsigned int* board, int* scrn)
     {
+        unsigned int i = (blockIdx.x * blockDim.x) + threadIdx.x;
+        unsigned int j = (blockIdx.y * blockDim.y) + threadIdx.y;
         unsigned int indx = (blockDim.x * blockIdx.x) + threadIdx.x;
+        unsigned int resx = *(inps + );
         // unsigned int lim = ;
-        if (indx < *(inps + 6))
+        if (indx < j + (i * resx)) //LEFT HERE
         {
             float bx = 0;
             float by = 0;
@@ -241,7 +244,7 @@ def renderer():
                      bh,
                      int(scrw * scrsplit * scrh),
                      ], dtype=cp.float32)
-    rendergpu((int(scrw * scrsplit),), (scrh,),
+    rendergpu((int((scrw * scrsplit) / 32),int(scrh / 16)), (32, 16),
               (args,
                board_gpu,
                screenarr))
