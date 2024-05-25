@@ -11,17 +11,16 @@ screen = pygame.display.set_mode((1120, 800))
 loaded_from_source = r'''
 extern "C"
 {
-__global__ void test_sum(int* y, const unsigned int arrxsize)
+__global__ void test_sum(int* y ) //, const unsigned int arrxsize)
     {
-    //unsigned int tid = (blockDim.x * (blockIdx.x + (blockDim.x * blockIdx.y))) + (threadIdx.x + (threadDim.x * threadIdx.y);
-    //unsigned int tn = threadIdx.x + (threadDim.x * threadIdx.y);
-    //unsigned int bn = blockIdx.x + (blockDim.x * blockIdx.y);
     unsigned int i = (blockIdx.x * blockDim.x) + threadIdx.x;
     unsigned int j = (blockIdx.y * blockDim.y) + threadIdx.y;
-    unsigned int tid = j + (i * arrxsize);
+    unsigned int ylim = gridDim.y * blockDim.y;
+    unsigned int tid = j + (i * ylim);
+    unsigned int xlim = gridDim.x * blockDim.x;
     unsigned int py = j;
     unsigned int px = i;
-        if (tid < 1120 * 800)
+        if (tid < xlim * ylim)
         {
             if(px > 300)
             {
