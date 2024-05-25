@@ -84,12 +84,15 @@ cps = base_cps * math.pow(cellsize, -0.6)
 #     board[0][i] = 3
 #     board[bw - 1][i] = 3
 # board[50][50] = 2
-for i in range(bw):
-    board[i][200] = 2
-    board[i][201] = 2
-    board[i][202] = 2
-    board[i][203] = 2
+# for i in range(bw):
+#     board[i][200] = 1
+#     board[i][201] = 1
+#     board[i][202] = 1
+#     board[i][203] = 1
 middle = int(bw / 2)
+board[middle, middle] = 1
+board[middle, middle - 1] = 1
+board[middle, middle + 1] = 1
 
 i = 0
 board_gpu = cp.asarray(board, dtype=cp.uint32)
@@ -101,15 +104,13 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
     {
         unsigned int i = (blockIdx.x * blockDim.x) + threadIdx.x;
         unsigned int j = (blockIdx.y * blockDim.y) + threadIdx.y;
-        unsigned int indx = (blockDim.x * blockIdx.x) + threadIdx.x;
-        unsigned int resx = *(inps + );
-        // unsigned int lim = ;
-        if (indx < j + (i * resx)) //LEFT HERE
+        unsigned int ylim = gridDim.y * blockDim.y;
+        unsigned int indx = j + (i * ylim);
+        unsigned int xlim = gridDim.x * blockDim.x;
+        if (indx < xlim * ylim)
         {
             float bx = 0;
             float by = 0;
-            int px = 0;
-            int py = 0;
             float cs = 1;
             float cpx = 0;
             float cpy = 0;
@@ -118,16 +119,14 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
             float fracx = 0;
             float fracy = 0;
             
-            cpx = *(inps + 1);
-            cpy = *(inps + 2);
-            cs = *(inps + 3);
-            bw = *(inps + 4);
-            bh = *(inps + 5);
+            cpx = *(inps + 0);
+            cpy = *(inps + 1);
+            cs = *(inps + 2);
+            bw = *(inps + 3);
+            bh = *(inps + 4);
             
-            px = indx / blockDim.x;
-            py = indx % blockDim.x;
-            bx = (px / cs) + cpx;
-            by = (py / cs) + cpy;
+            bx = (i / cs) + cpx;
+            by = (j / cs) + cpy;
             fracx = bx - int(bx);
             fracy = by - int(by);
             if(bx >= 0 && by >= 0 && int(bx) <= bw && int(by) <= bh && fracx >= 0.1 && fracy >= 0.1)
@@ -236,15 +235,12 @@ updateboard = gpgpumodule.get_function('update')
 def renderer():
     screenarr = cp.zeros((int(scrw * scrsplit), scrh, 3), dtype=cp.uint32)
 
-    args = cp.array([scrw * scrsplit,
-                     cam_pos[0],
+    args = cp.array([cam_pos[0],
                      cam_pos[1],
                      cellsize,
                      bw,
-                     bh,
-                     int(scrw * scrsplit * scrh),
-                     ], dtype=cp.float32)
-    rendergpu((int((scrw * scrsplit) / 32),int(scrh / 16)), (32, 16),
+                     bh], dtype=cp.float32)
+    rendergpu((int((scrw * scrsplit) / 32), int(scrh / 16)), (32, 16),
               (args,
                board_gpu,
                screenarr))
@@ -266,8 +262,8 @@ while True:
             print("User quit")
             sys.exit()
 
-    if (i % ube_f) == int(ube_f / 2):
-        board_update()
+    # if (i % ube_f) == int(ube_f / 2):
+    #     board_update()
 
     scrn = np.zeros((scrw, scrh, 3), dtype=np.uint8)
     fps = clock.get_fps()
