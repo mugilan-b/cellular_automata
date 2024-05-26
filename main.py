@@ -2,9 +2,12 @@ import numpy as np
 import cupy as cp
 import time
 import math
-import pygame
 import sys
 import cv2
+import os
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+
+import pygame
 
 
 # Sim settings
@@ -17,14 +20,15 @@ base_cps = 100              # base mvmt speed
 scrsplit = 0.7              # screen split - board | stats, eff 896px
 maxfps = int(60)            # max FPS limit
 zoomsens = 1.008            # zoom sensitivity, multiplicative
-update_board_every_s = 2    # Update board every n seconds
+update_board_every_s = 0.1  # Update board every n seconds
 textcolor = "White"
 textbg = "Black"
+pause = True                # Start paused
+max_undos = 100             # length of undo history
 
 # TO DO:
-# * TEST, TEST and TEST!!
-# Possibly refactor and reorganize code
-# Beautify
+# Beautify UI
+# Add game recording
 
 # Initialize pygame & game setup:
 pygame.init()
@@ -80,6 +84,7 @@ bupsRect = bupstext.get_rect()
 bupsRect.left = butxtRect.right * 1.01
 bupsRect.top = butxtRect.top
 
+# Auto-set parameters
 dt = 0  # time elapsed (in ms)
 bh = int(bh)
 bw = int(bw)
@@ -87,30 +92,13 @@ ube_f = maxfps * update_board_every_s
 board = np.zeros((bw, bh), dtype=np.uint8)
 cam_pos = [bw / 2, bh / 2]
 cps = base_cps * math.pow(cellsize, -0.6)
-pause = False
-
-# Initial state
-# for i in range(bw):
-#     for j in range(bh):
-#         board[i][j] = 1
-# for i in range(bw):
-#     board[i][0] = 3
-#     board[i][bh - 1] = 3
-# for i in range(bh):
-#     board[0][i] = 3
-#     board[bw - 1][i] = 3
-# board[50][50] = 2
-# for i in range(bw):
-#     board[i][200] = 1
-#     board[i][201] = 1
-#     board[i][202] = 1
-#     board[i][203] = 1
-board[24, 23] = 1
-board[24, 0] = 1
-board[24, 1] = 1
-
+set_zoom_in = False
+set_zoom_out = False
+undohist = []
+currundos = 0
 i = 0
 board_gpu = cp.asarray(board, dtype=cp.uint32)
+
 cppsource = r'''
 extern "C"
 {
@@ -152,14 +140,19 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
                 unsigned int bval = *(board + b_y + (bh * b_x));
                 if(bval == 0)
                 {
-                    *(scrn + (3 * indx)) = 30;
-                    *(scrn + (3 * indx) + 1) = 30;
-                    *(scrn + (3 * indx) + 2) = 30;
+                    *(scrn + (3 * indx)) = 20;
+                    *(scrn + (3 * indx) + 1) = 20;
+                    *(scrn + (3 * indx) + 2) = 20;
                 } else if (bval == 1)
                 {
-                    *(scrn + (3 * indx)) = 255;
+                    *(scrn + (3 * indx)) = 20;
+                    *(scrn + (3 * indx) + 1) = 55;
+                    *(scrn + (3 * indx) + 2) = 20;
+                } else if (bval == 2)
+                {
+                    *(scrn + (3 * indx)) = 30;
                     *(scrn + (3 * indx) + 1) = 255;
-                    *(scrn + (3 * indx) + 2) = 255;  
+                    *(scrn + (3 * indx) + 2) = 30;
                 } else
                 {
                     *(scrn + (3 * indx)) = 0;
@@ -190,6 +183,7 @@ __global__ void update(const unsigned int* inps, unsigned int* board)
             unsigned int topind = 0;
             unsigned int bottomind = 0;
             int cnt = 0;
+            int cnt2 = 0;
 
             leftind = (((i - 1) + b_w) % b_w);
             rightind = (i + 1) % b_w;
@@ -228,14 +222,54 @@ __global__ void update(const unsigned int* inps, unsigned int* board)
             {
                 cnt++;
             }
-            __syncthreads();
-            if(cnt < 2)
+            
+            if(*(board + topind + (b_h * i)) == 2)
             {
-                *(board + j + (b_h * i)) = 0;
+                cnt2++;
             }
-            if(cnt == 3)
+            if(*(board + topind + (b_h * rightind)) == 2)
             {
-                *(board + j + (b_h * i)) = 1;
+                cnt2++;
+            }
+            if(*(board + j + (b_h * rightind)) == 2)
+            {
+                cnt2++;
+            }
+            if(*(board + bottomind + (b_h * rightind)) == 2)
+            {
+                cnt2++;
+            }
+            if(*(board + bottomind + (b_h * i)) == 2)
+            {
+                cnt2++;
+            }
+            if(*(board + bottomind + (b_h * leftind)) == 2)
+            {
+                cnt2++;
+            }
+            if(*(board + j + (b_h * leftind)) == 2)
+            {
+                cnt2++;
+            }
+            if(*(board + topind + (b_h * leftind)) == 2)
+            {
+                cnt2++;
+            }
+            __syncthreads();
+            if(cnt == 0)
+            {
+                if(cnt2 == 0)
+                {
+                    *(board + j + (b_h * i)) = 0;
+                }
+                else if(*(board + topind + (b_h * leftind)) == 2)
+                {
+                    *(board + j + (b_h * i)) = 1;
+                }
+            }
+            if(cnt == 1 && cnt2 == 1 && *(board + j + (b_h * i)) == 1)
+            {
+                *(board + j + (b_h * i)) = 2;
             }
             if(cnt > 3)
             {
@@ -275,35 +309,70 @@ def board_update():
 
 # Main game loop:
 while True:
-    mx = pygame.mouse.get_pos()[0]
-    my = pygame.mouse.get_pos()[1]
-
     for event in pygame.event.get():
         if event.type == pygame.MOUSEBUTTONDOWN:
+            mx, my = event.pos
+            bx = int((mx / cellsize) + cam_pos[0])
+            by = int((my / cellsize) + cam_pos[1])
             if pausetxtRect.collidepoint(mx, my):
                 pause = not pause
+            if event.button == 1:
+                if mx < int(scrw * scrsplit) and my < int(scrh):
+                    if 0 <= bx < bw and 0 <= by < bh:
+                        if currundos < max_undos:
+                            undohist.append([bx, by, board[bx][by]])
+                            currundos += 1
+                        else:
+                            undohist.append([bx, by, board[bx][by]])
+                            undohist.pop(0)
+                        board[bx][by] = (board[bx][by] + 1) % 3
+                        board_gpu[bx][by] = (board_gpu[bx][by] + 1) % 3
+            if event.button == 6:
+                set_zoom_in = True
+            if event.button == 7:
+                set_zoom_out = True
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_z and currundos > 0:
+                bx, by, tmp = undohist.pop()
+                board[bx][by] = tmp
+                board_gpu[bx][by] = tmp
+                currundos -= 1
+        if event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 6:
+                set_zoom_in = False
+            if event.button == 7:
+                set_zoom_out = False
         if event.type == pygame.QUIT:
             pygame.quit()
             print("User quit")
             sys.exit()
 
-    bx = int((mx / cellsize) + cam_pos[0])
-    by = int((my / cellsize) + cam_pos[1])
-
-    if pygame.mouse.get_pressed()[0] == 1:
-        if 0 <= bx < bw and 0 <= by < bh:
-            board[bx][by] = 1
-            board_gpu[bx][by] = 1
-
-    if pygame.mouse.get_pressed()[2] == 1:
-        if 0 <= bx < bw and 0 <= by < bh:
-            board[bx][by] = 0
-            board_gpu[bx][by] = 0
+    if pygame.mouse.get_pressed()[2]:
+        mx, my = pygame.mouse.get_pos()
+        bx = int((mx / cellsize) + cam_pos[0])
+        by = int((my / cellsize) + cam_pos[1])
+        if mx < int(scrw * scrsplit) and my < int(scrh):
+            if bw > bx >= 0 and bh > by >= 0:
+                if board[bx][by] != 0:
+                    if currundos < max_undos:
+                        undohist.append([bx, by, board[bx][by]])
+                        currundos += 1
+                    else:
+                        undohist.append([bx, by, board[bx][by]])
+                        undohist.pop(0)
+                    board[bx][by] = 0
+                    board_gpu[bx][by] = 0
 
     if pause:
         pausetxt = font_big.render('Paused', True, textcolor, "firebrick4")
     else:
         pausetxt = font_big.render('Pause', True, textcolor, "darkslategray")
+
+    if set_zoom_in:
+        if cellsize > 1:
+            cellsize /= zoomsens
+    if set_zoom_out:
+        cellsize *= zoomsens
 
     pausetxtRect = pausetxt.get_rect()
     pausetxtRect.left = (scrw * scrsplit * 1.1)
@@ -354,11 +423,6 @@ while True:
         cam_pos[0] -= cps * (dt / 1000)
     if keys[pygame.K_d]:
         cam_pos[0] += cps * (dt / 1000)
-    if keys[pygame.K_k]:
-        if cellsize > 1:
-            cellsize /= zoomsens
-    if keys[pygame.K_j]:
-        cellsize *= zoomsens
 
     cps = base_cps * math.pow(cellsize, -0.6)
     # Render
