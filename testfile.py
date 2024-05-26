@@ -3,34 +3,34 @@ import cupy as cp
 import pygame
 import sys
 
-# from cupyx.profiler import benchmark
-# print(benchmark(squared_diff, (x, y), n_repeat=1000))
 
 pygame.init()
-screen = pygame.display.set_mode((1120, 800))
+resX = int(1280)
+resY = int(720)
+screen = pygame.display.set_mode((resX, resY))
 loaded_from_source = r'''
 extern "C"
 {
-__global__ void test_sum(int* y ) //, const unsigned int arrxsize)
+__global__ void test_sum(int* y, int* z)
     {
     unsigned int i = (blockIdx.x * blockDim.x) + threadIdx.x;
     unsigned int j = (blockIdx.y * blockDim.y) + threadIdx.y;
     unsigned int ylim = gridDim.y * blockDim.y;
-    unsigned int tid = j + (i * ylim);
     unsigned int xlim = gridDim.x * blockDim.x;
-    unsigned int py = j;
-    unsigned int px = i;
+    unsigned int tid = j + (i * ylim);
         if (tid < xlim * ylim)
         {
-            if(px > 300)
+            unsigned int tmp = *(z + tid);
+            if(true)
             {
-                *(y + (tid * 3)) = 0;
-                *(y + (tid * 3) + 1) = 255;
+                // unsigned int tmp = *(z + i + (y * xlim));
+                *(y + (tid * 3)) = tmp;
+                *(y + (tid * 3) + 1) = 0;
                 *(y + (tid * 3) + 2) = 0;
             }
             else
             {
-                *(y + (tid * 3)) = 255;
+                *(y + (tid * 3)) = 0;
                 *(y + (tid * 3) + 1) = 0;
                 *(y + (tid * 3) + 2) = 0;
             }
@@ -40,8 +40,13 @@ __global__ void test_sum(int* y ) //, const unsigned int arrxsize)
 '''
 module = cp.RawModule(code=loaded_from_source)
 disp = module.get_function('test_sum')
-scrn = cp.zeros((1120, 800, 3), dtype=cp.uint32)
-disp((70, 50), (16, 16), scrn)
+arr = cp.zeros((resX, resY), dtype=np.uint32)
+for i in range(resX):
+    arr[i][400] = 255
+    arr[i][401] = 255
+    arr[i][402] = 255
+scrn = cp.zeros((resX, resY, 3), dtype=cp.uint32)
+disp((int(resX / 32), int(resY / 16)), (32, 16), (scrn, arr))
 while True:
     screen.fill("Black")
     for event in pygame.event.get():

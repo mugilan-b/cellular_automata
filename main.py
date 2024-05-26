@@ -10,8 +10,8 @@ import cv2
 # Sim settings
 scrw = 1280                 # screen width
 scrh = 720                  # screen height
-bw = 480                   # board dims
-bh = bw
+bw = 48                   # board dims
+bh = 24
 cellsize = 40               # default cell size in pixels
 base_cps = 100              # base mvmt speed
 scrsplit = 0.7              # screen split - board | stats, eff 896px
@@ -22,8 +22,7 @@ textcolor = "White"
 textbg = "Black"
 
 # TO DO:
-# * CHECK AND FIX COORDINATES, X AND Y SEEM FLIPPED?????
-# AS A RESULT, BOARD UPDATE DOESN'T WORK AS INTENDED!!!!
+# Fix board update: Probably a problem with synchronization.....
 # * Add update counter text: to count number of board updates so far.
 # * Add mouse interactivity.
 
@@ -89,14 +88,12 @@ cps = base_cps * math.pow(cellsize, -0.6)
 #     board[i][201] = 1
 #     board[i][202] = 1
 #     board[i][203] = 1
-middle = int(bw / 2)
-board[middle, middle] = 1
-board[middle, middle - 1] = 1
-board[middle, middle + 1] = 1
+board[24, 11] = 1
+board[24, 12] = 1
+board[24, 13] = 1
 
 i = 0
 board_gpu = cp.asarray(board, dtype=cp.uint32)
-
 cppsource = r'''
 extern "C"
 {
@@ -118,6 +115,8 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
             int bh = 100;
             float fracx = 0;
             float fracy = 0;
+            int b_x = 0;
+            int b_y = 0;
             
             cpx = *(inps + 0);
             cpy = *(inps + 1);
@@ -127,16 +126,19 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
             
             bx = (i / cs) + cpx;
             by = (j / cs) + cpy;
-            fracx = bx - int(bx);
-            fracy = by - int(by);
-            if(bx >= 0 && by >= 0 && int(bx) <= bw && int(by) <= bh && fracx >= 0.1 && fracy >= 0.1)
+            b_x = static_cast<int>(bx);
+            b_y = static_cast<int>(by);
+            fracx = bx - b_x;
+            fracy = by - b_y;
+            if(bx >= 0 && by >= 0 && b_x < bw && b_y < bh && fracx >= 0.1 && fracy >= 0.1)
             {
-                if(*(board + int(bx) + (bw * int(by))) == 0)
+                unsigned int bval = *(board + b_y + (bh * b_x));
+                if(bval == 0)
                 {
                     *(scrn + (3 * indx)) = 30;
                     *(scrn + (3 * indx) + 1) = 30;
                     *(scrn + (3 * indx) + 2) = 30;
-                } else if (*(board + int(bx) + (bw * int(by))) == 1)
+                } else if (bval == 1)
                 {
                     *(scrn + (3 * indx)) = 255;
                     *(scrn + (3 * indx) + 1) = 255;
@@ -144,7 +146,7 @@ __global__ void render(const float* inps, const unsigned int* board, int* scrn)
                 } else
                 {
                     *(scrn + (3 * indx)) = 0;
-                    *(scrn + (3 * indx) + 1) = 60;
+                    *(scrn + (3 * indx) + 1) = 255;
                     *(scrn + (3 * indx) + 2) = 0;
                 }
             }
@@ -163,9 +165,7 @@ __global__ void update(const unsigned int* inps, unsigned int* board)
         unsigned int j = (blockIdx.y * blockDim.y) + threadIdx.y;
         unsigned int b_w = *(inps + 0);
         unsigned int b_h = *(inps + 1);
-        unsigned int tid = j + (i * b_w);
-        unsigned int px = i;        
-        unsigned int py = j;
+        unsigned int tid = j + (i * b_h);
         if(tid < b_w * b_h)
         {
             unsigned int leftind = 0;
@@ -179,49 +179,49 @@ __global__ void update(const unsigned int* inps, unsigned int* board)
             topind = (j - 1) % b_h;
             bottomind = (j + 1) % b_h;
             
-            if(*(board + i + (b_w * topind)) == 1)
+            if(*(board + topind + (b_h * i)) == 1)
             {
                 cnt++;
             }
-            if(*(board + rightind + (b_w * topind)) == 1)
+            if(*(board + topind + (b_h * rightind)) == 1)
             {
                 cnt++;
             }
-            if(*(board + rightind + (b_w * j)) == 1)
+            if(*(board + j + (b_h * rightind)) == 1)
             {
                 cnt++;
             }
-            if(*(board + rightind + (b_w * bottomind)) == 1)
+            if(*(board + bottomind + (b_h * rightind)) == 1)
             {
                 cnt++;
             }
-            if(*(board + i + (b_w * bottomind)) == 1)
+            if(*(board + bottomind + (b_h * i)) == 1)
             {
                 cnt++;
             }
-            if(*(board + leftind + (b_w * bottomind)) == 1)
+            if(*(board + bottomind + (b_h * leftind)) == 1)
             {
                 cnt++;
             }
-            if(*(board + leftind + (b_w * j)) == 1)
+            if(*(board + j + (b_h * leftind)) == 1)
             {
                 cnt++;
             }
-            if(*(board + leftind + (b_w * topind)) == 1)
+            if(*(board + topind + (b_h * leftind)) == 1)
             {
                 cnt++;
             }
             if(cnt < 2)
             {
-                *(board + i + (b_w * j)) = 0;
+                *(board + j + (b_h * i)) = 0;
             }
             if(cnt > 1 && cnt < 4)
             {
-                *(board + i + (b_w * j)) = 1;
+                *(board + j + (b_h * i)) = 1;
             }
             if(cnt > 3)
             {
-                *(board + i + (b_w * j)) = 0;
+                *(board + j + (b_h * i)) = 0;
             }
         }
     }
@@ -262,8 +262,8 @@ while True:
             print("User quit")
             sys.exit()
 
-    # if (i % ube_f) == int(ube_f / 2):
-    #     board_update()
+    if (i % ube_f) == int(ube_f / 2):
+        board_update()
 
     scrn = np.zeros((scrw, scrh, 3), dtype=np.uint8)
     fps = clock.get_fps()
