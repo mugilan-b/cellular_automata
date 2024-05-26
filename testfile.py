@@ -23,7 +23,6 @@ __global__ void test_sum(int* y, int* z)
             unsigned int tmp = *(z + tid);
             if(true)
             {
-                // unsigned int tmp = *(z + i + (y * xlim));
                 *(y + (tid * 3)) = tmp;
                 *(y + (tid * 3) + 1) = 0;
                 *(y + (tid * 3) + 2) = 0;
@@ -53,6 +52,7 @@ while True:
         if event.type == pygame.QUIT:
             pygame.quit()
             print("User quit")
+            print(cp.max(arr))
             sys.exit()
 
     pygame.surfarray.blit_array(screen, scrn.get())

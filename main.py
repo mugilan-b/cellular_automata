@@ -22,8 +22,6 @@ textcolor = "White"
 textbg = "Black"
 
 # TO DO:
-# Fix board update: Probably a problem with synchronization.....
-# * Add update counter text: to count number of board updates so far.
 # * Add mouse interactivity.
 
 # Initialize pygame & game setup:
@@ -63,6 +61,21 @@ csnt = font.render(str(cellsize),
 csntRect = csnt.get_rect()
 csntRect.left = cstRect.right * 1.01
 csntRect.top = cstRect.top
+butxt = font.render('Updates: ',
+                    True,
+                    textcolor,
+                    textbg)
+butxtRect = butxt.get_rect()
+butxtRect.left = (scrw * scrsplit * 1.03)
+butxtRect.top = cstRect.bottom * 1.1
+bups = 0    # board updates so far
+bupstext = font.render(str(bups),
+                       True,
+                       textcolor,
+                       textbg)
+bupsRect = bupstext.get_rect()
+bupsRect.left = butxtRect.right * 1.01
+bupsRect.top = butxtRect.top
 
 dt = 0  # time elapsed (in ms)
 bh = int(bh)
@@ -88,9 +101,9 @@ cps = base_cps * math.pow(cellsize, -0.6)
 #     board[i][201] = 1
 #     board[i][202] = 1
 #     board[i][203] = 1
-board[24, 11] = 1
-board[24, 12] = 1
-board[24, 13] = 1
+board[24, 23] = 1
+board[24, 0] = 1
+board[24, 1] = 1
 
 i = 0
 board_gpu = cp.asarray(board, dtype=cp.uint32)
@@ -173,10 +186,10 @@ __global__ void update(const unsigned int* inps, unsigned int* board)
             unsigned int topind = 0;
             unsigned int bottomind = 0;
             int cnt = 0;
-            
-            leftind = (i - 1) % b_w;
+
+            leftind = (((i - 1) + b_w) % b_w);
             rightind = (i + 1) % b_w;
-            topind = (j - 1) % b_h;
+            topind = (((j - 1) + b_h) % b_h);
             bottomind = (j + 1) % b_h;
             
             if(*(board + topind + (b_h * i)) == 1)
@@ -211,11 +224,12 @@ __global__ void update(const unsigned int* inps, unsigned int* board)
             {
                 cnt++;
             }
+            __syncthreads();
             if(cnt < 2)
             {
                 *(board + j + (b_h * i)) = 0;
             }
-            if(cnt > 1 && cnt < 4)
+            if(cnt == 3)
             {
                 *(board + j + (b_h * i)) = 1;
             }
@@ -223,6 +237,7 @@ __global__ void update(const unsigned int* inps, unsigned int* board)
             {
                 *(board + j + (b_h * i)) = 0;
             }
+            __syncthreads();
         }
     }
 }
@@ -264,11 +279,13 @@ while True:
 
     if (i % ube_f) == int(ube_f / 2):
         board_update()
+        bups += 1
 
     scrn = np.zeros((scrw, scrh, 3), dtype=np.uint8)
     fps = clock.get_fps()
     fpstext = font.render(str(f'{fps:.2f}'), True, textcolor, textbg)
     csnt = font.render(str(f'{cellsize:.2f}'), True, textcolor, textbg)
+    bupstext = font.render(str(bups), True, textcolor, textbg)
 
     scrn[0:int(scrw * scrsplit)][:] = renderer()
 
@@ -291,6 +308,8 @@ while True:
     screen.blit(fpstext, fpsRect)
     screen.blit(csnt, csntRect)
     screen.blit(cst, cstRect)
+    screen.blit(bupstext, bupsRect)
+    screen.blit(butxt, butxtRect)
 
     # Input handling:
     keys = pygame.key.get_pressed()
