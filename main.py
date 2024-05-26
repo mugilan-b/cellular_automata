@@ -10,7 +10,7 @@ import cv2
 # Sim settings
 scrw = 1280                 # screen width
 scrh = 720                  # screen height
-bw = 48                   # board dims
+bw = 48                     # board dims
 bh = 24
 cellsize = 40               # default cell size in pixels
 base_cps = 100              # base mvmt speed
@@ -22,13 +22,16 @@ textcolor = "White"
 textbg = "Black"
 
 # TO DO:
-# * Add mouse interactivity.
+# * TEST, TEST and TEST!!
+# Possibly refactor and reorganize code
+# Beautify
 
 # Initialize pygame & game setup:
 pygame.init()
 screen = pygame.display.set_mode((scrw, scrh))
 pygame.display.set_caption("Cellular Automation Simulator")
-font = pygame.font.Font('freesansbold.ttf', 32)
+font = pygame.font.Font('freesansbold.ttf', 28)
+font_big = pygame.font.Font('freesansbold.ttf', 64)
 clock = pygame.time.Clock()
 
 currfps = font.render('Current FPS: ',
@@ -84,6 +87,7 @@ ube_f = maxfps * update_board_every_s
 board = np.zeros((bw, bh), dtype=np.uint8)
 cam_pos = [bw / 2, bh / 2]
 cps = base_cps * math.pow(cellsize, -0.6)
+pause = False
 
 # Initial state
 # for i in range(bw):
@@ -271,13 +275,41 @@ def board_update():
 
 # Main game loop:
 while True:
+    mx = pygame.mouse.get_pos()[0]
+    my = pygame.mouse.get_pos()[1]
+
     for event in pygame.event.get():
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if pausetxtRect.collidepoint(mx, my):
+                pause = not pause
         if event.type == pygame.QUIT:
             pygame.quit()
             print("User quit")
             sys.exit()
 
-    if (i % ube_f) == int(ube_f / 2):
+    bx = int((mx / cellsize) + cam_pos[0])
+    by = int((my / cellsize) + cam_pos[1])
+
+    if pygame.mouse.get_pressed()[0] == 1:
+        if 0 <= bx < bw and 0 <= by < bh:
+            board[bx][by] = 1
+            board_gpu[bx][by] = 1
+
+    if pygame.mouse.get_pressed()[2] == 1:
+        if 0 <= bx < bw and 0 <= by < bh:
+            board[bx][by] = 0
+            board_gpu[bx][by] = 0
+
+    if pause:
+        pausetxt = font_big.render('Paused', True, textcolor, "firebrick4")
+    else:
+        pausetxt = font_big.render('Pause', True, textcolor, "darkslategray")
+
+    pausetxtRect = pausetxt.get_rect()
+    pausetxtRect.left = (scrw * scrsplit * 1.1)
+    pausetxtRect.bottom = scrh * 0.9
+
+    if (i % ube_f) == int(ube_f / 2) and pause == 0:
         board_update()
         bups += 1
 
@@ -310,6 +342,7 @@ while True:
     screen.blit(cst, cstRect)
     screen.blit(bupstext, bupsRect)
     screen.blit(butxt, butxtRect)
+    screen.blit(pausetxt, pausetxtRect)
 
     # Input handling:
     keys = pygame.key.get_pressed()
