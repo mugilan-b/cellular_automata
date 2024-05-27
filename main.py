@@ -5,37 +5,38 @@ import math
 import sys
 import cv2
 import os
+import pathlib
+
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
-
 import pygame
-
-
-# Sim settings
-scrw = 1280                 # screen width
-scrh = 720                  # screen height
-bw = 48                     # board dims
-bh = 24
-cellsize = 40               # default cell size in pixels
-base_cps = 100              # base mvmt speed
-scrsplit = 0.7              # screen split - board | stats, eff 896px
-maxfps = int(60)            # max FPS limit
-zoomsens = 1.008            # zoom sensitivity, multiplicative
-update_board_every_s = 0.1  # Update board every n seconds
-textcolor = "White"
-textbg = "Black"
-pause = True                # Start paused
-max_undos = 100             # length of undo history
 
 # TO DO:
 # Beautify UI
-# Add game recording
+
+# Sim settings
+scrw = 1280  # screen width
+scrh = 720  # screen height
+bw = 48  # board dims
+bh = 24
+cellsize = 40  # default cell size in pixels
+base_cps = 100  # base mvmt speed
+scrsplit = 0.7  # screen split - board | stats, eff 896px
+maxfps = int(60)  # max FPS limit
+zoomsens = 1.008  # zoom sensitivity, multiplicative
+update_board_every_s = 0.1  # Update board every n seconds
+textcolor = "White"
+textbg = "Black"
+pause = True  # Start paused
+max_undos = 100  # length of undo history
+fname = 'demo.npy'  # demo file
+buttonclr = "cadetblue"
 
 # Initialize pygame & game setup:
 pygame.init()
 screen = pygame.display.set_mode((scrw, scrh))
 pygame.display.set_caption("Cellular Automation Simulator")
 font = pygame.font.Font('freesansbold.ttf', 28)
-font_big = pygame.font.Font('freesansbold.ttf', 64)
+font_big = pygame.font.Font('freesansbold.ttf', 50)
 clock = pygame.time.Clock()
 
 currfps = font.render('Current FPS: ',
@@ -75,7 +76,7 @@ butxt = font.render('Updates: ',
 butxtRect = butxt.get_rect()
 butxtRect.left = (scrw * scrsplit * 1.03)
 butxtRect.top = cstRect.bottom * 1.1
-bups = 0    # board updates so far
+bups = 0  # board updates so far
 bupstext = font.render(str(bups),
                        True,
                        textcolor,
@@ -83,6 +84,27 @@ bupstext = font.render(str(bups),
 bupsRect = bupstext.get_rect()
 bupsRect.left = butxtRect.right * 1.01
 bupsRect.top = butxtRect.top
+lff = font_big.render('Load demo',
+                      True,
+                      textcolor,
+                      buttonclr)
+lffRect = lff.get_rect()
+lffRect.top = bupsRect.bottom * 1.1
+lffRect.left = int(scrw * scrsplit * 1.03)
+clrdem = font_big.render('Clear demo',
+                         True,
+                         textcolor,
+                         buttonclr)
+clrdemRect = clrdem.get_rect()
+clrdemRect.top = lffRect.bottom * 1.01
+clrdemRect.left = lffRect.left
+clrbrd = font_big.render('Clear board',
+                         True,
+                         textcolor,
+                         buttonclr)
+clrbrdRect = clrbrd.get_rect()
+clrbrdRect.top = clrdemRect.bottom * 1.1
+clrbrdRect.left = clrdemRect.left
 
 # Auto-set parameters
 dt = 0  # time elapsed (in ms)
@@ -98,6 +120,10 @@ undohist = []
 currundos = 0
 i = 0
 board_gpu = cp.asarray(board, dtype=cp.uint32)
+record = []
+isrecording = False
+isplayingdemo = False
+topause = False
 
 cppsource = r'''
 extern "C"
@@ -297,7 +323,9 @@ def renderer():
               (args,
                board_gpu,
                screenarr))
-    return screenarr.get()
+
+    _ = screenarr.get()
+    return _
 
 
 def board_update():
@@ -305,6 +333,22 @@ def board_update():
     args = cp.array([bw, bh], dtype=cp.uint32)
     updateboard((int(bw / 24), int(bh / 24)), (24, 24), (args, board_gpu))
     board = board_gpu.get()
+
+
+def saverectofile():
+    arrr = np.array(record, dtype=np.uint8)
+    np.save('D:/PyProjects/CellularAutomata/saves/' + fname, arrr)
+
+
+def loaddemo():
+    t = np.load('D:/PyProjects/CellularAutomata/saves/' + fname)
+    return t
+
+
+def clrboard():
+    global board, board_gpu
+    board = np.zeros((bw, bh), dtype=np.uint8)
+    board_gpu = cp.zeros((bw, bh), dtype=cp.uint32)
 
 
 # Main game loop:
@@ -316,7 +360,29 @@ while True:
             by = int((my / cellsize) + cam_pos[1])
             if pausetxtRect.collidepoint(mx, my):
                 pause = not pause
-            if event.button == 1:
+            if recordtxtRect.collidepoint(mx, my) and not isplayingdemo:
+                if isrecording:
+                    saverectofile()
+                    record = []
+                isrecording = not isrecording
+                pause = True
+            if lffRect.collidepoint(mx, my):
+                _ = loaddemo()
+                if _ is not None:
+                    pause = False
+                    topause = True
+                    pausein = i + 5
+                    isrecording = False
+                    isplayingdemo = True
+                    bups = 0
+                    demolength = len(_)
+            if clrdemRect.collidepoint(mx, my) and isplayingdemo:
+                clrboard()
+                isplayingdemo = False
+            if clrbrdRect.collidepoint(mx, my) and not isplayingdemo and not isrecording:
+                clrboard()
+                pause = True
+            if event.button == 1 and not isplayingdemo:
                 if mx < int(scrw * scrsplit) and my < int(scrh):
                     if 0 <= bx < bw and 0 <= by < bh:
                         if currundos < max_undos:
@@ -332,7 +398,7 @@ while True:
             if event.button == 7:
                 set_zoom_out = True
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_z and currundos > 0:
+            if event.key == pygame.K_z and currundos > 0 and not isplayingdemo:
                 bx, by, tmp = undohist.pop()
                 board[bx][by] = tmp
                 board_gpu[bx][by] = tmp
@@ -347,7 +413,7 @@ while True:
             print("User quit")
             sys.exit()
 
-    if pygame.mouse.get_pressed()[2]:
+    if pygame.mouse.get_pressed()[2] and not isplayingdemo:
         mx, my = pygame.mouse.get_pos()
         bx = int((mx / cellsize) + cam_pos[0])
         by = int((my / cellsize) + cam_pos[1])
@@ -368,6 +434,11 @@ while True:
     else:
         pausetxt = font_big.render('Pause', True, textcolor, "darkslategray")
 
+    if isrecording:
+        recordtxt = font.render('Recording...', True, "chartreuse1", buttonclr)
+    else:
+        recordtxt = font.render('Record', True, textcolor, buttonclr)
+
     if set_zoom_in:
         if cellsize > 1:
             cellsize /= zoomsens
@@ -378,9 +449,21 @@ while True:
     pausetxtRect.left = (scrw * scrsplit * 1.1)
     pausetxtRect.bottom = scrh * 0.9
 
-    if (i % ube_f) == int(ube_f / 2) and pause == 0:
-        board_update()
-        bups += 1
+    recordtxtRect = recordtxt.get_rect()
+    recordtxtRect.left = (scrw * scrsplit * 1.05)
+    recordtxtRect.bottom = scrh * 0.7
+
+    if (i % ube_f) == int(ube_f / 2) and not pause:
+        if isplayingdemo is False:
+            if isrecording:
+                record.append(board)
+            board_update()
+            bups += 1
+        else:
+            board = _[bups].copy().astype(np.uint8)
+            board_gpu = cp.array(_[bups], dtype=cp.uint32)
+            if bups < demolength - 1:
+                bups += 1
 
     scrn = np.zeros((scrw, scrh, 3), dtype=np.uint8)
     fps = clock.get_fps()
@@ -412,6 +495,10 @@ while True:
     screen.blit(bupstext, bupsRect)
     screen.blit(butxt, butxtRect)
     screen.blit(pausetxt, pausetxtRect)
+    screen.blit(recordtxt, recordtxtRect)
+    screen.blit(lff, lffRect)
+    screen.blit(clrdem, clrdemRect)
+    screen.blit(clrbrd, clrbrdRect)
 
     # Input handling:
     keys = pygame.key.get_pressed()
@@ -427,5 +514,10 @@ while True:
     cps = base_cps * math.pow(cellsize, -0.6)
     # Render
     pygame.display.flip()
+
+    if topause and i == pausein:
+        pause = True
+        topause = False
+
     dt = clock.tick(maxfps)
     i += 1
