@@ -1,4 +1,4 @@
-Python project to simulate Cellular automation. <br>
+Python project to simulate Cellular automaton. <br>
 
 <b>Features</b>:<br>
 GPU offloaded rendering(CuPY), GPU-based game update(CuPY), Interactive gamestates(PyGame-CE), customizable view (PyGame-CE), Saving game state evolution as a recording (openCV).
